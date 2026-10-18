@@ -17,6 +17,8 @@ import {
   resaleChain,
   saleValues,
   swapBonus,
+  swapTerms,
+  swapValue,
 } from "./gems"
 import type { GemProduct, MarketState, SwapOffer } from "./gems"
 import ListingForm from "./ListingForm"
@@ -623,6 +625,13 @@ export default function GemMarketplace({
   const swapInventory = market.products.filter(
     (product) => product.owner === "You" && product.id !== swapping?.id,
   )
+  const selectedSwapItem = market.products.find(
+    (product) => product.id === swapItemId,
+  )
+  const selectedSwapTerms =
+    swapping && selectedSwapItem
+      ? swapTerms(swapping, selectedSwapItem)
+      : null
 
   if (completedPurchase)
     return (
@@ -1026,7 +1035,8 @@ export default function GemMarketplace({
               <Mark name="swap" />
               <span>
                 Accepted swaps earn you a <strong>15% platform bonus</strong>{" "}
-                based on the item you pass on. Gem sales do not earn a bonus.
+                based on the item you pass on. Values can differ by up to 50
+                gems before a wallet top-up is required.
               </span>
               <span>
                 {
@@ -1048,6 +1058,24 @@ export default function GemMarketplace({
                 )
                 if (!offered || !requested) return null
                 const incoming = offer.recipient === "You"
+                const terms = swapTerms(requested, offered)
+                const yourBonus = swapBonus(
+                  BigInt(
+                    (incoming ? requested : offered).acquisition,
+                  ),
+                )
+                const theirBonus = swapBonus(
+                  BigInt(
+                    (incoming ? offered : requested).acquisition,
+                  ),
+                )
+                const yourTopUpChange =
+                  terms.topUpPayer === null
+                    ? 0n
+                    : (incoming && terms.topUpPayer === "proposer") ||
+                        (!incoming && terms.topUpPayer === "recipient")
+                      ? terms.gemTopUp
+                      : -terms.gemTopUp
                 return (
                   <article className="gm-panel gm-offer" key={offer.id}>
                     <div className="gm-offer-heading">
@@ -1068,6 +1096,10 @@ export default function GemMarketplace({
                         />
                         <small>{offer.proposer} offers</small>
                         <strong>{offered.name}</strong>
+                        <span className="gm-offer-value">
+                          <Mark name="gem" />
+                          {formatGems(terms.offeredValue)}
+                        </span>
                       </div>
                       <Mark name="swap" />
                       <div>
@@ -1077,16 +1109,45 @@ export default function GemMarketplace({
                         />
                         <small>For {requested.owner}’s</small>
                         <strong>{requested.name}</strong>
+                        <span className="gm-offer-value">
+                          <Mark name="gem" />
+                          {formatGems(terms.requestedValue)}
+                        </span>
+                      </div>
+                    </div>
+                    <div className="gm-swap-terms">
+                      <div>
+                        <span>Value match</span>
+                        <strong>
+                          {terms.withinBuffer
+                            ? `${formatGems(
+                                terms.offeredValue > terms.requestedValue
+                                  ? terms.offeredValue - terms.requestedValue
+                                  : terms.requestedValue - terms.offeredValue,
+                              )} gem difference · within 50`
+                            : `${terms.topUpPayer === "proposer" ? offer.proposer : offer.recipient} adds ${formatGems(terms.gemTopUp)} wallet gems`}
+                        </strong>
+                      </div>
+                      <div>
+                        <span>Bonuses only</span>
+                        <strong>
+                          You +{formatGems(yourBonus)} · Them +
+                          {formatGems(theirBonus)}
+                        </strong>
                       </div>
                     </div>
                     {incoming && offer.status === "pending" && (
                       <>
                         <p className="gm-small">
-                          Accepting swaps ownership and adds{" "}
+                          Accepting exchanges the items. Your wallet changes by{" "}
+                          {yourBonus + yourTopUpChange < 0n ? "−" : "+"}
                           {formatGems(
-                            swapBonus(BigInt(requested.acquisition)),
+                            yourBonus + yourTopUpChange < 0n
+                              ? -(yourBonus + yourTopUpChange)
+                              : yourBonus + yourTopUpChange,
                           )}{" "}
-                          bonus gems to your wallet.
+                          gems from your bonus and any balancing top-up. The
+                          item values are not paid into either wallet.
                         </p>
                         <div className="gm-offer-actions">
                           <button
@@ -1386,7 +1447,7 @@ export default function GemMarketplace({
                           : t.kind === "buy"
                             ? "Gem purchase"
                             : t.kind === "swap"
-                              ? "Accepted swap bonus"
+                              ? "Swap bonus & balancing gems"
                               : "Prototype credit"}
                       </p>
                       {BigInt(t.bonus) > 0n && (
@@ -1404,12 +1465,22 @@ export default function GemMarketplace({
                         </button>
                       )}
                     </div>
-                    <strong className={t.kind === "buy" ? "" : "gm-green-text"}>
-                      {t.kind === "buy" ? "−" : "+"}
-                      {formatGems(t.amount)}
+                    <strong
+                      className={
+                        t.kind === "buy" || BigInt(t.amount) < 0n
+                          ? ""
+                          : "gm-green-text"
+                      }
+                    >
+                      {t.kind === "buy" || BigInt(t.amount) < 0n ? "−" : "+"}
+                      {formatGems(
+                        BigInt(t.amount) < 0n
+                          ? -BigInt(t.amount)
+                          : BigInt(t.amount),
+                      )}
                       <small>
                         {t.kind === "swap"
-                          ? " swap bonus"
+                          ? " wallet change"
                           : ` gems${BigInt(t.bonus) > 0n ? " + bonus" : ""}`}
                       </small>
                     </strong>
@@ -1560,9 +1631,14 @@ export default function GemMarketplace({
           {swapInventory.length ? (
             <div className="gm-swap-picker">
               {swapInventory.map((product) => {
-                const eligible =
+                const categoryEligible =
                   !swapping.priorityOnly ||
                   matchesSwapPreference(swapping, product)
+                const terms = swapTerms(swapping, product)
+                const canFund =
+                  terms.topUpPayer !== "proposer" ||
+                  balance >= terms.gemTopUp
+                const eligible = categoryEligible && canFund
                 return (
                   <button
                     className={swapItemId === product.id ? "is-selected" : ""}
@@ -1578,12 +1654,21 @@ export default function GemMarketplace({
                     <span>
                       <strong>{product.name}</strong>
                       <small>
-                        {eligible
-                          ? `${formatGems(
-                              swapBonus(BigInt(product.acquisition)),
-                            )} bonus gems if accepted`
-                          : `Not in the ${swapping.preferredSwapCategory} priority`}
+                        {!categoryEligible
+                          ? `Not in the ${swapping.preferredSwapCategory} priority`
+                          : !canFund
+                            ? `Need ${formatGems(terms.gemTopUp - balance)} more wallet gems`
+                            : `${formatGems(terms.offeredValue)} vs ${formatGems(terms.requestedValue)} gems`}
                       </small>
+                      {eligible && (
+                        <small>
+                          {terms.withinBuffer
+                            ? "Within the 50-gem swap buffer"
+                            : terms.topUpPayer === "proposer"
+                              ? `You add ${formatGems(terms.gemTopUp)} wallet gems`
+                              : `${swapping.owner} adds ${formatGems(terms.gemTopUp)} wallet gems`}
+                        </small>
+                      )}
                     </span>
                     {swapItemId === product.id && <Mark name="check" />}
                   </button>
@@ -1594,6 +1679,34 @@ export default function GemMarketplace({
             <div className="gm-tip">
               <Mark name="help" />
               <p>Add or buy a keeper first, then return to propose a swap.</p>
+            </div>
+          )}
+          {selectedSwapItem && selectedSwapTerms && (
+            <div className="gm-swap-proposal-summary">
+              <div>
+                <span>Your item value</span>
+                <strong>{formatGems(selectedSwapTerms.offeredValue)}</strong>
+              </div>
+              <div>
+                <span>Their item value</span>
+                <strong>{formatGems(selectedSwapTerms.requestedValue)}</strong>
+              </div>
+              <p>
+                {selectedSwapTerms.withinBuffer
+                  ? "Values are within the 50-gem buffer. No wallet top-up."
+                  : selectedSwapTerms.topUpPayer === "proposer"
+                    ? `You add ${formatGems(selectedSwapTerms.gemTopUp)} wallet gems to balance the offer.`
+                    : `${swapping.owner} adds ${formatGems(selectedSwapTerms.gemTopUp)} wallet gems to balance the offer.`}
+              </p>
+              <p>
+                If accepted, you earn only your{" "}
+                {formatGems(
+                  swapBonus(BigInt(selectedSwapItem.acquisition)),
+                )}{" "}
+                bonus gems—not the item value. {swapping.owner} earns{" "}
+                {formatGems(swapBonus(BigInt(swapping.acquisition)))} bonus
+                gems.
+              </p>
             </div>
           )}
           <button
@@ -1731,6 +1844,19 @@ export default function GemMarketplace({
               <li>
                 An accepted swap adds a{" "}
                 <strong>15% bonus for the item you pass on.</strong>
+              </li>
+              <li>
+                Item Store values can differ by up to{" "}
+                <strong>50 gems with no adjustment.</strong>
+              </li>
+              <li>
+                For a larger gap, the owner of the lower-value item adds wallet
+                gems equal to the full difference.
+              </li>
+              <li>
+                Item values are never credited to either wallet. Both people
+                receive only their swap bonus, plus or minus any balancing gem
+                transfer.
               </li>
               <li>
                 The next owner’s acquisition value is exactly what they paid.

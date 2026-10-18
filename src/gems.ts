@@ -170,6 +170,10 @@ export type SwapOffer = {
   recipient: string
   status: "pending" | "accepted" | "rejected"
   date: string
+  offeredValue?: string
+  requestedValue?: string
+  gemTopUp?: string
+  topUpPayer?: "proposer" | "recipient" | null
 }
 export type MarketState = {
   balance: string
@@ -360,6 +364,31 @@ export function completeSale(state: MarketState, id: string): MarketState {
   }
 }
 
+export function swapValue(product: GemProduct) {
+  return saleValues(BigInt(product.acquisition)).price
+}
+
+export function swapTerms(requested: GemProduct, offered: GemProduct) {
+  const requestedValue = swapValue(requested)
+  const offeredValue = swapValue(offered)
+  const difference = requestedValue - offeredValue
+  const absoluteDifference = difference < 0n ? -difference : difference
+  const withinBuffer = absoluteDifference <= 50n
+  return {
+    requestedValue,
+    offeredValue,
+    difference,
+    withinBuffer,
+    gemTopUp: withinBuffer ? 0n : absoluteDifference,
+    topUpPayer:
+      withinBuffer || difference === 0n
+        ? null
+        : difference > 0n
+          ? ("proposer" as const)
+          : ("recipient" as const),
+  }
+}
+
 export function proposeSwap(
   state: MarketState,
   offeredProductId: string,
@@ -374,6 +403,14 @@ export function proposeSwap(
   if (requested.priorityOnly && !matchesSwapPreference(requested, offered))
     throw new Error(
       `This seller only accepts ${requested.preferredSwapCategory} swap offers.`,
+    )
+  const terms = swapTerms(requested, offered)
+  if (
+    terms.topUpPayer === "proposer" &&
+    BigInt(state.balance) < terms.gemTopUp
+  )
+    throw new Error(
+      `Need ${formatGems(terms.gemTopUp - BigInt(state.balance))} more wallet gems to balance this swap.`,
     )
   if (
     state.offers.some(
@@ -395,6 +432,10 @@ export function proposeSwap(
         recipient: requested.owner,
         status: "pending",
         date: new Date().toISOString(),
+        offeredValue: String(terms.offeredValue),
+        requestedValue: String(terms.requestedValue),
+        gemTopUp: String(terms.gemTopUp),
+        topUpPayer: terms.topUpPayer,
       },
       ...state.offers,
     ],
@@ -429,10 +470,26 @@ export function respondToSwap(
     requested.owner !== "You"
   )
     throw new Error("One of these items is no longer available.")
-  const bonus = swapBonus(BigInt(requested.acquisition))
+  const terms = swapTerms(requested, offered)
+  if (
+    terms.topUpPayer === "recipient" &&
+    BigInt(state.balance) < terms.gemTopUp
+  )
+    throw new Error(
+      `Need ${formatGems(terms.gemTopUp - BigInt(state.balance))} more wallet gems to accept this swap.`,
+    )
+  const recipientBonus = swapBonus(BigInt(requested.acquisition))
+  const proposerBonus = swapBonus(BigInt(offered.acquisition))
+  const topUpChange =
+    terms.topUpPayer === "proposer"
+      ? terms.gemTopUp
+      : terms.topUpPayer === "recipient"
+        ? -terms.gemTopUp
+        : 0n
+  const walletChange = recipientBonus + topUpChange
   return {
     ...state,
-    balance: String(BigInt(state.balance) + bonus),
+    balance: String(BigInt(state.balance) + walletChange),
     products: state.products.map((product) =>
       product.id === offered.id
         ? { ...product, owner: "You", status: "owned" as const }
@@ -450,8 +507,8 @@ export function respondToSwap(
         id: crypto.randomUUID(),
         kind: "swap",
         name: `Swapped ${requested.name} for ${offered.name}`,
-        amount: String(bonus),
-        bonus: String(bonus),
+        amount: String(walletChange),
+        bonus: String(recipientBonus),
         date: new Date().toISOString(),
       },
       ...state.transactions,
@@ -478,6 +535,23 @@ export function gemChecks() {
       name: "Swap bonus 810 → 122",
       pass: (() => {
         return swapBonus(810n) === 122n
+      })(),
+    },
+    {
+      name: "Swap values within 50 gems need no top-up",
+      pass: swapTerms(
+        { acquisition: "1000" } as GemProduct,
+        { acquisition: "950" } as GemProduct,
+      ).gemTopUp === 0n,
+    },
+    {
+      name: "Larger swap gap requires a full wallet-gem top-up",
+      pass: (() => {
+        const terms = swapTerms(
+          { acquisition: "1000" } as GemProduct,
+          { acquisition: "800" } as GemProduct,
+        )
+        return terms.gemTopUp === 180n && terms.topUpPayer === "proposer"
       })(),
     },
     {
