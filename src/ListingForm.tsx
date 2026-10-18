@@ -17,6 +17,15 @@ type ListingFormProps = {
   initial?: GemProduct | null
 }
 const picture = (name: string) => `/assets/${name}`
+const swapCategories = [
+  "Clothing",
+  "Shoes",
+  "Jewellery",
+  "Electronics",
+  "Watches",
+  "Furniture",
+  "Games",
+]
 export default function ListingForm({
   onReview,
   onCancel,
@@ -28,6 +37,12 @@ export default function ListingForm({
   const [date, setDate] = useState(initial?.purchaseDate || "")
   const [photo, setPhoto] = useState(initial?.photo || "")
   const [bill, setBill] = useState(initial?.bill || "")
+  const [preferredSwapCategory, setPreferredSwapCategory] = useState(
+    initial?.preferredSwapCategory || "",
+  )
+  const [priorityOnly, setPriorityOnly] = useState(
+    initial?.priorityOnly || false,
+  )
   const [uploadMenu, setUploadMenu] = useState(false)
   const [fileError, setFileError] = useState("")
   const photoInput = useRef<HTMLInputElement>(null)
@@ -55,7 +70,13 @@ export default function ListingForm({
       photo,
       bill,
       owner: "You",
-      status: "owned",
+      status: initial?.status || "owned",
+      ...(preferredSwapCategory
+        ? {
+            preferredSwapCategory,
+            priorityOnly,
+          }
+        : {}),
     })
   }
   return (
@@ -236,6 +257,58 @@ export default function ListingForm({
                 </button>
               ))}
             </div>
+          </fieldset>
+          <fieldset className="listing-swap-preference">
+            <legend>
+              Priority swap category <span>Optional</span>
+            </legend>
+            <p className="footnote left">
+              Tell swappers what kind of item you would most like in return.
+            </p>
+            <div className="chips">
+              {swapCategories.map((option) => (
+                <button
+                  type="button"
+                  key={option}
+                  className={`chip ${
+                    preferredSwapCategory === option ? "selected" : ""
+                  }`}
+                  aria-pressed={preferredSwapCategory === option}
+                  onClick={() => {
+                    if (preferredSwapCategory === option) {
+                      setPreferredSwapCategory("")
+                      setPriorityOnly(false)
+                    } else {
+                      setPreferredSwapCategory(option)
+                    }
+                  }}
+                >
+                  {option}
+                </button>
+              ))}
+            </div>
+            <button
+              type="button"
+              role="switch"
+              aria-checked={priorityOnly}
+              className={`listing-priority-toggle ${
+                priorityOnly ? "is-on" : ""
+              }`}
+              disabled={!preferredSwapCategory}
+              onClick={() => setPriorityOnly((current) => !current)}
+            >
+              <span aria-hidden="true">
+                <i />
+              </span>
+              <span>
+                <strong>Priority only mode</strong>
+                <small>
+                  {preferredSwapCategory
+                    ? `Only accept ${preferredSwapCategory} swap proposals`
+                    : "Choose a priority category to enable"}
+                </small>
+              </span>
+            </button>
           </fieldset>
           <label htmlFor="listing-price">
             How much did you pay?

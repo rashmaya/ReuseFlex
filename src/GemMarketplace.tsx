@@ -9,6 +9,7 @@ import {
   gemChecks,
   initialMarket,
   listingValue,
+  matchesSwapPreference,
   proposeSwap,
   readCost,
   readWhole,
@@ -258,6 +259,21 @@ function ProductCard({
             {formatGems(product.acquisition)}
           </s>
         </div>
+        {product.preferredSwapCategory && (
+          <div
+            className={`gm-swap-preference ${
+              product.priorityOnly ? "is-priority-only" : ""
+            }`}
+          >
+            <Mark name="swap" />
+            <span>
+              <strong>
+                {product.priorityOnly ? "Swaps only" : "Swap priority"}
+              </strong>
+              {product.preferredSwapCategory}
+            </span>
+          </div>
+        )}
         <span className="gm-bonus-chip">
           <Mark name="swap" />
           {formatGems(swapBonus(BigInt(product.acquisition)))} bonus on swaps
@@ -406,6 +422,22 @@ export default function GemMarketplace({
       return saved
         ? {
             ...saved,
+            products: saved.products.map((product) => {
+              const seed = initial.products.find(
+                (candidate) => candidate.id === product.id,
+              )
+              if (!seed) return product
+              return {
+                ...product,
+                category: product.category || seed.category,
+                ...(product.id === "sample-1"
+                  ? {
+                      preferredSwapCategory: seed.preferredSwapCategory,
+                      priorityOnly: seed.priorityOnly,
+                    }
+                  : {}),
+              }
+            }),
             transactions: saved.transactions.map((transaction) =>
               transaction.kind === "sale"
                 ? { ...transaction, bonus: "0" }
@@ -737,6 +769,16 @@ export default function GemMarketplace({
             }}
             onReview={(product) => {
               localStorage.removeItem("reuse-listing-draft-v1")
+              setMarket((previous) => ({
+                ...previous,
+                products: previous.products.some(
+                  (candidate) => candidate.id === product.id,
+                )
+                  ? previous.products.map((candidate) =>
+                      candidate.id === product.id ? product : candidate,
+                    )
+                  : previous.products,
+              }))
               setSeller(product)
               setChainStart(product.acquisition)
               setListingOpen(false)
@@ -802,17 +844,13 @@ export default function GemMarketplace({
                     </strong>
                   </div>
                 )}
-                {!market.products.some(
-                  (product) => product.id === sellProduct.id,
-                ) && (
-                  <button
-                    className="gm-back-link"
-                    onClick={() => setListingOpen(true)}
-                  >
-                    Edit purchase details
-                    <Mark name="arrow" />
-                  </button>
-                )}
+                <button
+                  className="gm-back-link"
+                  onClick={() => setListingOpen(true)}
+                >
+                  Edit listing &amp; swap preferences
+                  <Mark name="arrow" />
+                </button>
                 <div className="gm-pair">
                   <span>Your acquisition value</span>
                   <strong>
@@ -1511,32 +1549,46 @@ export default function GemMarketplace({
             <p className="gm-muted">
               Choose one of your keepers to offer {swapping.owner}.
             </p>
+            {swapping.preferredSwapCategory && (
+              <p className="gm-swap-sheet-preference">
+                <Mark name="swap" />
+                {swapping.priorityOnly ? "Accepting only" : "Prefers"}{" "}
+                <strong>{swapping.preferredSwapCategory}</strong>
+              </p>
+            )}
           </div>
           {swapInventory.length ? (
             <div className="gm-swap-picker">
-              {swapInventory.map((product) => (
-                <button
-                  className={swapItemId === product.id ? "is-selected" : ""}
-                  aria-pressed={swapItemId === product.id}
-                  key={product.id}
-                  onClick={() => setSwapItemId(product.id)}
-                >
-                  <img
-                    src={product.photo || `/assets/${product.image}`}
-                    alt=""
-                  />
-                  <span>
-                    <strong>{product.name}</strong>
-                    <small>
-                      {formatGems(
-                        swapBonus(BigInt(product.acquisition)),
-                      )}{" "}
-                      bonus gems if accepted
-                    </small>
-                  </span>
-                  {swapItemId === product.id && <Mark name="check" />}
-                </button>
-              ))}
+              {swapInventory.map((product) => {
+                const eligible =
+                  !swapping.priorityOnly ||
+                  matchesSwapPreference(swapping, product)
+                return (
+                  <button
+                    className={swapItemId === product.id ? "is-selected" : ""}
+                    aria-pressed={swapItemId === product.id}
+                    disabled={!eligible}
+                    key={product.id}
+                    onClick={() => setSwapItemId(product.id)}
+                  >
+                    <img
+                      src={product.photo || `/assets/${product.image}`}
+                      alt=""
+                    />
+                    <span>
+                      <strong>{product.name}</strong>
+                      <small>
+                        {eligible
+                          ? `${formatGems(
+                              swapBonus(BigInt(product.acquisition)),
+                            )} bonus gems if accepted`
+                          : `Not in the ${swapping.preferredSwapCategory} priority`}
+                      </small>
+                    </span>
+                    {swapItemId === product.id && <Mark name="check" />}
+                  </button>
+                )
+              })}
             </div>
           ) : (
             <div className="gm-tip">

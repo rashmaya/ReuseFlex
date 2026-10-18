@@ -134,6 +134,24 @@ export type GemProduct = {
   photo?: string
   purchaseDate?: string
   category?: string
+  preferredSwapCategory?: string
+  priorityOnly?: boolean
+}
+
+export function swapCategory(category?: string) {
+  if (category && ["Jackets", "Tops", "Bottoms"].includes(category))
+    return "Clothing"
+  return category || "Other"
+}
+
+export function matchesSwapPreference(
+  requested: GemProduct,
+  offered: GemProduct,
+) {
+  return (
+    !requested.preferredSwapCategory ||
+    swapCategory(offered.category) === requested.preferredSwapCategory
+  )
 }
 export type Transaction = {
   id: string
@@ -168,6 +186,7 @@ export function initialMarket(): MarketState {
       age: 15,
       image: "774f0.png",
       owner: "Rohan",
+      category: "Tops",
     },
     {
       name: "Weekend sneakers",
@@ -175,6 +194,9 @@ export function initialMarket(): MarketState {
       age: 60,
       image: "20ca5.png",
       owner: "Meera",
+      category: "Shoes",
+      preferredSwapCategory: "Clothing",
+      priorityOnly: true,
     },
     {
       name: "Everyday denim",
@@ -182,6 +204,7 @@ export function initialMarket(): MarketState {
       age: 120,
       image: "c5bb2.png",
       owner: "You",
+      category: "Jackets",
     },
     {
       name: "Study-session headphones",
@@ -189,6 +212,7 @@ export function initialMarket(): MarketState {
       age: 250,
       image: "6690f.png",
       owner: "Ishaan",
+      category: "Electronics",
     },
     {
       name: "The studio laptop",
@@ -196,6 +220,7 @@ export function initialMarket(): MarketState {
       age: 500,
       image: "be307.png",
       owner: "Ananya",
+      category: "Electronics",
     },
     {
       name: "One more festive season",
@@ -203,6 +228,7 @@ export function initialMarket(): MarketState {
       age: 900,
       image: "84f2e.png",
       owner: "Neha",
+      category: "Tops",
     },
   ].map((p, index) => ({
     ...p,
@@ -345,6 +371,10 @@ export function proposeSwap(
     throw new Error("Choose an item from your wardrobe.")
   if (!requested || requested.owner === "You" || requested.status !== "listed")
     throw new Error("This item is not available for swapping.")
+  if (requested.priorityOnly && !matchesSwapPreference(requested, offered))
+    throw new Error(
+      `This seller only accepts ${requested.preferredSwapCategory} swap offers.`,
+    )
   if (
     state.offers.some(
       (offer) =>
